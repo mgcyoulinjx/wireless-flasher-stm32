@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Exlink STM32 无线烧录器</title>
+    <style>
+      body { font-family: sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+      main { max-width: 760px; margin: 0 auto; padding: 24px; }
+      .card { background: #111827; border: 1px solid #334155; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+      h1,h2 { margin-top: 0; }
+      button { background: #2563eb; color: white; border: 0; padding: 10px 14px; border-radius: 8px; cursor: pointer; }
+      button.secondary { background: #475569; }
+      button.danger { background: #dc2626; }
+      input, select { box-sizing: border-box; max-width: 100%; width: 100%; margin: 8px 0 12px; padding: 10px; border-radius: 8px; border: 1px solid #475569; background: #020617; color: #e2e8f0; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .row > * { flex: 1 1 200px; }
+      progress { width: 100%; height: 18px; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #020617; padding: 12px; border-radius: 8px; }
+      .muted { color: #94a3b8; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Exlink STM32 无线烧录器</h1>
+      <p class="muted">内置网页版本：embedded-upload-log-v3</p>
+      <div class="card">
+        <div class="row">
+          <h2>设备信息</h2>
+          <button id="refreshDeviceButton" class="secondary">刷新设备</button>
+          <button id="readChipButton" class="secondary">读取芯片信息</button>
+        </div>
+        <div id="deviceInfo" class="muted">正在加载...</div>
+        <pre id="chipInfo">未读取芯片信息。</pre>
+      </div>
+      <div class="card">
+        <h2>默认接线模板</h2>
+        <pre id="wiringTemplate">正在加载接线信息...</pre>
+      </div>
+      <div class="card">
+        <h2>上传固件包</h2>
+        <p class="muted">推荐：直接上传 Intel HEX 文件，不需要 manifest.json。</p>
+        <label>Intel HEX</label>
+        <input id="hexFile" type="file" />
+        <p class="muted">旧格式备用：同时选择 manifest.json 和 app.bin。</p>
+        <label>manifest.json</label>
+        <input id="manifestFile" type="file" accept="application/json,.json" />
+        <label>app.bin</label>
+        <input id="firmwareFile" type="file" accept=".bin,application/octet-stream" />
+        <div class="row">
+          <button id="uploadButton" onclick="document.getElementById('uploadLog').textContent='按钮已点击，内置页面事件已触发。';">上传并校验</button>
+          <button id="deleteButton" class="secondary">删除当前固件包</button>
+        </div>
+        <h3>上传校验日志</h3>
+        <pre id="uploadLog">等待上传。</pre>
+      </div>
+      <div class="card">
+        <h2>固件保存列表</h2>
+        <p class="muted">当前固件会直接用于烧录；保存列表可在以后重新选择，无需再次上传。</p>
+        <div id="storageInfo" class="muted">正在加载存储空间...</div>
+        <label>保存名称</label>
+        <input id="firmwareNameInput" type="text" placeholder="例如：出厂固件 v1" />
+        <div class="row">
+          <button id="savePackageButton" class="secondary">保存当前固件</button>
+        </div>
+        <label>已保存固件</label>
+        <select id="savedPackageSelect"></select>
+        <div class="row">
+          <button id="deleteSavedPackageButton" class="danger">删除已保存固件</button>
+        </div>
+        <pre id="savedPackageLog">等待操作。</pre>
+      </div>
+      <div class="card">
+        <h2>manifest 示例</h2>
+        <pre id="manifestExample">正在加载示例...</pre>
+      </div>
+      <div class="card">
+        <h2>开始烧录</h2>
+        <label>烧录固件</label>
+        <select id="flashPackageSelect"></select>
+        <label>烧录接口</label>
+        <select id="transportSelect" disabled>
+          <option value="swd" selected>SWD (STM32F1)</option>
+        </select>
+        <input id="modeSelect" type="hidden" value="manual" />
+        <p id="flashHint" class="muted">当前只保留 SWD：请连接 SWDIO11 / SWCLK12 / GND，不接 NRST。</p>
+        <div class="row">
+          <button id="flashButton">开始烧录</button>
+          <button id="cancelButton" class="danger">取消</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>状态</h2>
+        <div id="statusSummary">-</div>
+        <progress id="progressBar" value="0" max="100"></progress>
+        <pre id="statusLog">等待操作。</pre>
+      </div>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>
