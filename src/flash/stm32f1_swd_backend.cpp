@@ -6,6 +6,7 @@
 #include "hal/target_control.h"
 #include "hal/swd_transport.h"
 #include "stm32_swd_debug.h"
+#include "stm32_chip_info.h"
 #include "stm32f1_flash.h"
 
 Stm32F1SwdBackend::Stm32F1SwdBackend(TargetControl &targetControl,
@@ -111,8 +112,15 @@ bool Stm32F1SwdBackend::flash(const FlashManifest &manifest,
     error = "SWD chip ID read failed: " + error;
     return false;
   }
+  const uint32_t detectedChipId = chipId & 0x0FFFU;
   if (chipDetectCallback) {
-    chipDetectCallback(chipId & 0x0FFFU, context);
+    chipDetectCallback(detectedChipId, context);
+  }
+  const Stm32ChipInfo &chip = stm32ChipInfo(detectedChipId);
+  if (manifest.address < chip.flashStart || manifest.address + manifest.size < manifest.address ||
+      manifest.address + manifest.size > chip.flashEnd) {
+    error = "STM32F1 firmware exceeds detected chip flash range";
+    return false;
   }
   String chipMessage = "SWD: DBGMCU_IDCODE 0x" + String(chipId, HEX);
   chipMessage.toUpperCase();
@@ -150,7 +158,9 @@ bool Stm32F1SwdBackend::flash(const FlashManifest &manifest,
     error = "Flashing cancelled";
     return false;
   }
-  constexpr size_t kProgramChunkSize = 1024;
+  constexpr size_t kProgramChunkSize = 4096;
+  constexpr size_t kProgramProgressInterval = 4096;
+  size_t nextProgressAt = kProgramProgressInterval;
   const unsigned long programStarted = millis();
   for (size_t offset = 0; offset < manifest.size; offset += kProgramChunkSize) {
     const size_t chunkSize = min(kProgramChunkSize, manifest.size - offset);
@@ -158,11 +168,15 @@ bool Stm32F1SwdBackend::flash(const FlashManifest &manifest,
       error = "SWD program failed at 0x" + String(manifest.address + offset, HEX) + ": " + error;
       return false;
     }
-    if (progressCallback && (((offset + chunkSize) % 4096U) == 0 || offset + chunkSize == manifest.size)) {
-      String message = "SWD: programmed " + String(offset + chunkSize) + " / " + String(manifest.size) + " bytes, " + String(millis() - programStarted) + " ms";
-      if (!progressCallback(offset + chunkSize, manifest.size, message.c_str(), context)) {
+    const size_t written = offset + chunkSize;
+    if (progressCallback && (written >= nextProgressAt || written == manifest.size)) {
+      String message = "SWD: programmed " + String(written) + " / " + String(manifest.size) + " bytes, " + String(millis() - programStarted) + " ms";
+      if (!progressCallback(written, manifest.size, message.c_str(), context)) {
         error = "Flashing cancelled";
         return false;
+      }
+      while (nextProgressAt <= written) {
+        nextProgressAt += kProgramProgressInterval;
       }
     }
   }

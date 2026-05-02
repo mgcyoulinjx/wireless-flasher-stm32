@@ -19,6 +19,53 @@ const deleteSavedPackageButton = document.getElementById('deleteSavedPackageButt
 
 let latestPackageReady = false;
 
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.style.position = 'fixed';
+  textArea.style.left = '-9999px';
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  document.execCommand('copy');
+  textArea.remove();
+}
+
+function setupLogCopyButtons() {
+  for (const log of document.querySelectorAll('pre')) {
+    if (log.parentElement && log.parentElement.classList.contains('log-window')) {
+      continue;
+    }
+    const wrapper = document.createElement('div');
+    wrapper.className = 'log-window';
+    log.parentNode.insertBefore(wrapper, log);
+    wrapper.appendChild(log);
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'copy-log-button';
+    button.textContent = '复制';
+    button.addEventListener('click', async () => {
+      try {
+        await copyText(log.textContent || '');
+        button.textContent = '已复制';
+        button.classList.add('copied');
+        setTimeout(() => {
+          button.textContent = '复制';
+          button.classList.remove('copied');
+        }, 1200);
+      } catch (error) {
+        button.textContent = '复制失败';
+        setTimeout(() => { button.textContent = '复制'; }, 1200);
+      }
+    });
+    wrapper.appendChild(button);
+  }
+}
+
 function setUploadLog(message) {
   const timestamp = new Date().toLocaleTimeString();
   const line = `[${timestamp}] ${message}`;
@@ -65,7 +112,8 @@ async function refreshInfo() {
     const packageText = info.packageReady
       ? ` | 固件: ${info.targetChip || '-'} @ 0x${Number(info.targetAddress || 0).toString(16).toUpperCase()} | ${info.totalBytes} bytes | CRC32 0x${Number(info.firmwareCrc32 || 0).toString(16).toUpperCase().padStart(8, '0')}`
       : ' | 暂无已校验固件包';
-    deviceInfo.textContent = `热点: ${info.ssid} | 地址: ${info.ip} | 接口: SWD | 当前状态: ${info.state}${packageText}`;
+    const detectedText = info.detectedChip ? ` | 当前芯片: ${info.detectedChip}` : ' | 当前芯片: 未检测';
+    deviceInfo.textContent = `热点: ${info.ssid} | 地址: ${info.ip} | 接口: SWD${detectedText} | 当前状态: ${info.state}${packageText}`;
     wiringTemplate.textContent = `GND  -> STM32 GND\nGPIO${info.swdIoPin} -> STM32 SWDIO\nGPIO${info.swdClockPin} -> STM32 SWCLK`;
     updateFlashControls(info);
   } catch (error) {
@@ -302,6 +350,7 @@ readChipButton.addEventListener('click', async () => {
   }
 });
 
+setupLogCopyButtons();
 refreshInfo();
 refreshStatus();
 refreshPackages();

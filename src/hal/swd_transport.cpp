@@ -12,17 +12,40 @@ constexpr uint32_t kDpPowerUpReq = 0x50000000UL;
 constexpr uint32_t kDpPowerUpAck = 0xA0000000UL;
 }
 
-SwdTransport::SwdTransport(int ioPin, int clockPin) : ioPin_(ioPin), clockPin_(clockPin) {}
+SwdTransport::SwdTransport(int ioPin, int clockPin) : ioPin_(ioPin), clockPin_(clockPin), ioMask_(0), clockMask_(0), fastMode_(false) {}
 
 void SwdTransport::begin() {
+  fastMode_ = false;
+  ioMask_ = 1UL << ioPin_;
+  clockMask_ = 1UL << clockPin_;
   pinMode(clockPin_, OUTPUT);
-  digitalWrite(clockPin_, HIGH);
-  pinMode(ioPin_, INPUT);
+  clockHi();
+  ioInput();
+}
+
+void SwdTransport::setFastMode(bool enabled) {
+  fastMode_ = enabled;
+}
+
+void SwdTransport::ioOutput() {
+  if (fastMode_) {
+    ioOutputFast();
+  } else {
+    pinMode(ioPin_, OUTPUT);
+  }
+}
+
+void SwdTransport::ioInput() {
+  if (fastMode_) {
+    ioInputFast();
+  } else {
+    pinMode(ioPin_, INPUT);
+  }
 }
 
 void SwdTransport::lineReset() {
-  pinMode(ioPin_, OUTPUT);
-  digitalWrite(ioPin_, HIGH);
+  ioOutput();
+  ioHi();
   for (int i = 0; i < 60; ++i) {
     clockCycle();
   }
@@ -31,17 +54,17 @@ void SwdTransport::lineReset() {
 bool SwdTransport::switchToSwd() {
   lineReset();
   static constexpr uint16_t sequence = 0xE79E;
-  pinMode(ioPin_, OUTPUT);
+  ioOutput();
   for (int i = 0; i < 16; ++i) {
     writeBit((sequence >> i) & 0x1);
   }
   lineReset();
-  pinMode(ioPin_, OUTPUT);
-  digitalWrite(ioPin_, LOW);
+  ioOutput();
+  ioLo();
   for (int i = 0; i < 8; ++i) {
     clockCycle();
   }
-  pinMode(ioPin_, INPUT);
+  ioInput();
   return true;
 }
 
@@ -134,20 +157,36 @@ bool SwdTransport::readApBlock(uint8_t address, uint32_t *values, size_t count, 
   return readDp(kDpRdbuff, values[count - 1], error);
 }
 
-bool SwdTransport::writeAp(uint8_t address, uint32_t value, String &error) {
-  for (int attempt = 0; attempt < 50; ++attempt) {
-    uint32_t data = value;
-    uint8_t ack = transfer(makeRequest(true, false, address), &data, false, error);
-    if (ack == kAckOk) {
-      return true;
+bool SwdTransport::writeApBlock(uint8_t address, const uint32_t *values, size_t count, String &error) {
+  if (count == 0) {
+    return true;
+  }
+
+  const uint8_t request = makeRequest(true, false, address);
+  for (size_t index = 0; index < count; ++index) {
+    bool written = false;
+    for (int attempt = 0; attempt < 50; ++attempt) {
+      uint32_t data = values[index];
+      const uint8_t ack = transfer(request, &data, false, error);
+      if (ack == kAckOk) {
+        written = true;
+        break;
+      }
+      if (ack != kAckWait) {
+        return false;
+      }
+      delayMicroseconds(50);
     }
-    if (ack != kAckWait) {
+    if (!written) {
+      error = "SWD AP block write WAIT timeout";
       return false;
     }
-    delayMicroseconds(50);
   }
-  error = "SWD WAIT timeout";
-  return false;
+  return true;
+}
+
+bool SwdTransport::writeAp(uint8_t address, uint32_t value, String &error) {
+  return writeApBlock(address, &value, 1, error);
 }
 
 bool SwdTransport::powerUpDebug(String &error) {
@@ -182,6 +221,8 @@ bool SwdTransport::clearStickyErrors(String &error) {
 }
 
 void SwdTransport::sampleLineLevels(String &message) {
+  const bool wasFast = fastMode_;
+  fastMode_ = false;
   pinMode(clockPin_, OUTPUT);
   digitalWrite(clockPin_, LOW);
   pinMode(ioPin_, INPUT);
@@ -191,65 +232,70 @@ void SwdTransport::sampleLineLevels(String &message) {
   pinMode(ioPin_, OUTPUT);
   delayMicroseconds(20);
   const int drivenLow = digitalRead(ioPin_);
-  digitalWrite(ioPin_, HIGH);
+  ioHi();
   delayMicroseconds(20);
   const int drivenHigh = digitalRead(ioPin_);
   pinMode(ioPin_, INPUT);
+  fastMode_ = wasFast;
   message = "SWD line sample: input_pullup=" + String(pullup) + ", drive_low=" + String(drivenLow) + ", drive_high=" + String(drivenHigh);
 }
 
 void SwdTransport::clockCycle() {
-  digitalWrite(clockPin_, LOW);
+  clockLo();
   delayMicroseconds(0);
-  digitalWrite(clockPin_, HIGH);
+  clockHi();
   delayMicroseconds(0);
 }
 
 void SwdTransport::writeBit(bool level) {
-  digitalWrite(ioPin_, level ? HIGH : LOW);
-  digitalWrite(clockPin_, LOW);
+  if (level) {
+    ioHi();
+  } else {
+    ioLo();
+  }
+  clockLo();
   delayMicroseconds(0);
-  digitalWrite(clockPin_, HIGH);
+  clockHi();
   delayMicroseconds(0);
 }
 
 bool SwdTransport::readBit() {
-  digitalWrite(clockPin_, LOW);
+  clockLo();
   delayMicroseconds(0);
-  bool level = digitalRead(ioPin_);
-  digitalWrite(clockPin_, HIGH);
+  bool level = ioLevel();
+  clockHi();
   delayMicroseconds(0);
   return level;
 }
 
 void SwdTransport::writeTurnaround() {
-  pinMode(ioPin_, INPUT);
+  ioInput();
   clockCycle();
-  pinMode(ioPin_, OUTPUT);
+  ioOutput();
 }
 
 void SwdTransport::readTurnaround() {
-  pinMode(ioPin_, INPUT);
+  ioInput();
   clockCycle();
 }
 
 void SwdTransport::recoverAfterFailedTransfer(uint8_t ack) {
   if (ack == kAckWait || ack == kAckFault || ack == kAckOk) {
     clockCycle();
-    pinMode(ioPin_, OUTPUT);
-    digitalWrite(ioPin_, HIGH);
+    ioOutput();
+    ioHi();
     return;
   }
-  pinMode(ioPin_, OUTPUT);
-  digitalWrite(ioPin_, HIGH);
+  ioOutput();
+  ioHi();
   for (int i = 0; i < 8; ++i) {
     clockCycle();
   }
-  pinMode(ioPin_, INPUT);
+  ioInput();
 }
 
 uint8_t SwdTransport::transfer(uint8_t request, uint32_t *data, bool read, String &error) {
-  pinMode(ioPin_, OUTPUT);
+  ioOutput();
   uint8_t parity = 0;
   writeBit(true);
   writeBit((request >> 1) & 0x1);
@@ -299,6 +345,9 @@ uint8_t SwdTransport::transfer(uint8_t request, uint32_t *data, bool read, Strin
     bool parityBit = readBit();
     if (parityBit != (dataParity & 0x1)) {
       error = "SWD parity mismatch";
+      writeTurnaround();
+      ioInput();
+      return 0;
     }
     writeTurnaround();
     if (data) {
@@ -306,7 +355,7 @@ uint8_t SwdTransport::transfer(uint8_t request, uint32_t *data, bool read, Strin
     }
   } else {
     writeTurnaround();
-    pinMode(ioPin_, OUTPUT);
+    ioOutput();
     value = data ? *data : 0;
     for (int bit = 0; bit < 32; ++bit) {
       bool level = (value >> bit) & 0x1;
@@ -318,6 +367,6 @@ uint8_t SwdTransport::transfer(uint8_t request, uint32_t *data, bool read, Strin
     writeBit(dataParity & 0x1);
   }
 
-  pinMode(ioPin_, INPUT);
+  ioInput();
   return ack;
 }

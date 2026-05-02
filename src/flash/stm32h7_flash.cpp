@@ -8,9 +8,11 @@ constexpr uint32_t kFlashKey2 = 0xCDEF89AB;
 constexpr uint32_t kFlashBank1Keyr = 0x52002004;
 constexpr uint32_t kFlashBank1Sr = 0x52002010;
 constexpr uint32_t kFlashBank1Cr = 0x5200200C;
+constexpr uint32_t kFlashBank1Ccr = 0x52002014;
 constexpr uint32_t kFlashBank2Keyr = 0x52002104;
 constexpr uint32_t kFlashBank2Sr = 0x52002110;
 constexpr uint32_t kFlashBank2Cr = 0x5200210C;
+constexpr uint32_t kFlashBank2Ccr = 0x52002114;
 constexpr uint32_t kFlashCrLock = 0x00000001;
 constexpr uint32_t kFlashCrPg = 0x00000002;
 constexpr uint32_t kFlashCrSer = 0x00000004;
@@ -57,7 +59,11 @@ bool Stm32H7Flash::programFlashWords(uint32_t address, const uint8_t *data, size
     error = "STM32H7 flash writes require 32-byte alignment";
     return false;
   }
-  if (!unlock(kFlashBank1Keyr, kFlashBank1Cr, error) || !unlock(kFlashBank2Keyr, kFlashBank2Cr, error)) {
+  if (!unlock(kFlashBank1Keyr, kFlashBank1Cr, error)) {
+    return false;
+  }
+  const uint32_t end = address + length;
+  if (end > kFlashStart + kBankSize && !unlock(kFlashBank2Keyr, kFlashBank2Cr, error)) {
     return false;
   }
 
@@ -67,7 +73,7 @@ bool Stm32H7Flash::programFlashWords(uint32_t address, const uint8_t *data, size
     const bool bank2 = currentAddress >= kFlashStart + kBankSize;
     const uint32_t cr = bank2 ? kFlashBank2Cr : kFlashBank1Cr;
     const uint32_t sr = bank2 ? kFlashBank2Sr : kFlashBank1Sr;
-    if (!waitReady(sr, error)) {
+    if (!waitReady(sr, bank2 ? kFlashBank2Ccr : kFlashBank1Ccr, error)) {
       return false;
     }
     if (!debug_.writeMemory32(cr, kFlashCrPg, error)) {
@@ -76,7 +82,7 @@ bool Stm32H7Flash::programFlashWords(uint32_t address, const uint8_t *data, size
     if (!debug_.writeMemory32Block(currentAddress, data + offset, kFlashWordSize, error)) {
       return false;
     }
-    if (!waitReady(sr, error)) {
+    if (!waitReady(sr, bank2 ? kFlashBank2Ccr : kFlashBank1Ccr, error)) {
       return false;
     }
     if (!debug_.writeMemory32(cr, 0, error)) {
@@ -131,7 +137,7 @@ bool Stm32H7Flash::unlock(uint32_t keyRegister, uint32_t controlRegister, String
   return debug_.writeMemory32(keyRegister, kFlashKey2, error);
 }
 
-bool Stm32H7Flash::waitReady(uint32_t statusRegister, String &error) {
+bool Stm32H7Flash::waitReady(uint32_t statusRegister, uint32_t clearRegister, String &error) {
   uint32_t sr = 0;
   const unsigned long started = millis();
   do {
@@ -140,7 +146,8 @@ bool Stm32H7Flash::waitReady(uint32_t statusRegister, String &error) {
     }
     if ((sr & kFlashSrBsy) == 0) {
       if (sr & kFlashSrErrors) {
-        debug_.writeMemory32(statusRegister, kFlashSrErrors, error);
+        const uint32_t errors = sr & kFlashSrErrors;
+        debug_.writeMemory32(clearRegister, errors, error);
         error = "STM32H7 flash controller reported an error";
         return false;
       }
@@ -164,7 +171,7 @@ bool Stm32H7Flash::eraseSector(int sector, String &error) {
   const uint32_t cr = bank2 ? kFlashBank2Cr : kFlashBank1Cr;
   const uint32_t sr = bank2 ? kFlashBank2Sr : kFlashBank1Sr;
   const uint32_t bankSector = static_cast<uint32_t>(sector % 8);
-  if (!waitReady(sr, error)) {
+  if (!waitReady(sr, bank2 ? kFlashBank2Ccr : kFlashBank1Ccr, error)) {
     return false;
   }
   const uint32_t value = kFlashCrSer | (bankSector << 8);
@@ -174,7 +181,7 @@ bool Stm32H7Flash::eraseSector(int sector, String &error) {
   if (!debug_.writeMemory32(cr, value | kFlashCrStart, error)) {
     return false;
   }
-  if (!waitReady(sr, error)) {
+  if (!waitReady(sr, bank2 ? kFlashBank2Ccr : kFlashBank1Ccr, error)) {
     return false;
   }
   return debug_.writeMemory32(cr, 0, error);

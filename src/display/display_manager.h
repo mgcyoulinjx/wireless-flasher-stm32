@@ -48,7 +48,12 @@ private:
   bool lastFlashBusy_ = false;
   uint32_t lastBatteryUpdateMs_ = 0;
   float filteredBatteryVoltage_ = 0.0f;
+  float previousFilteredBatteryVoltage_ = 0.0f;
+  float batteryRiseReferenceVoltage_ = 0.0f;
+  uint32_t batteryRiseReferenceMs_ = 0;
+  uint32_t chargeIconHoldUntilMs_ = 0;
   bool batteryFilterInitialized_ = false;
+  bool chargeIconActive_ = false;
 
   lv_obj_t *screen_ = nullptr;
   lv_obj_t *header_ = nullptr;

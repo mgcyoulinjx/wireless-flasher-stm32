@@ -159,7 +159,7 @@ bool Stm32FxSwdBackend::flash(const FlashManifest &manifest,
     return false;
   }
   const unsigned long eraseStarted = millis();
-  if (!flash_.eraseRange(manifest.address, alignedSize, chip.flashEnd, error)) {
+  if (!flash_.eraseRange(manifest.address, alignedSize, chip.flashEnd, family_, error)) {
     error = String("SWD ") + stm32FamilyName(family_) + " erase failed: " + error;
     return false;
   }

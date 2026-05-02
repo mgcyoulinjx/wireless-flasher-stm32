@@ -19,6 +19,7 @@ Stm32SwdDebug::Stm32SwdDebug(SwdTransport &transport, TargetControl &targetContr
 
 bool Stm32SwdDebug::connect(String &error) {
   transport_.begin();
+  transport_.setFastMode(false);
   uint32_t idcode = 0;
   String lastError;
   String history;
@@ -28,7 +29,11 @@ bool Stm32SwdDebug::connect(String &error) {
     if (transport_.readDp(0x00, idcode, lastError)) {
       cachedDpId_ = idcode;
       hasCachedDpId_ = true;
-      return transport_.powerUpDebug(error);
+      if (!transport_.powerUpDebug(error)) {
+        return false;
+      }
+      transport_.setFastMode(true);
+      return true;
     }
     history += "try" + String(attempt + 1) + " read: " + lastError + "; ";
     delay(5);
@@ -138,6 +143,8 @@ bool Stm32SwdDebug::writeMemory32Block(uint32_t address, const uint8_t *data, si
     return false;
   }
 
+  constexpr size_t kWriteBatchWords = 128;
+  uint32_t words[kWriteBatchWords];
   size_t offset = 0;
   while (offset < length) {
     const uint32_t currentAddress = address + offset;
@@ -153,15 +160,22 @@ bool Stm32SwdDebug::writeMemory32Block(uint32_t address, const uint8_t *data, si
     if (!selectApBank(kApDrw >> 4, error)) {
       return false;
     }
-    for (size_t segmentOffset = 0; segmentOffset < segmentBytes; segmentOffset += 4) {
-      const size_t dataOffset = offset + segmentOffset;
-      const uint32_t word = static_cast<uint32_t>(data[dataOffset]) |
-                            (static_cast<uint32_t>(data[dataOffset + 1]) << 8) |
-                            (static_cast<uint32_t>(data[dataOffset + 2]) << 16) |
-                            (static_cast<uint32_t>(data[dataOffset + 3]) << 24);
-      if (!transport_.writeAp(kApDrw & 0x0C, word, error)) {
+
+    size_t segmentOffset = 0;
+    while (segmentOffset < segmentBytes) {
+      const size_t remainingWords = (segmentBytes - segmentOffset) / 4;
+      const size_t batchWords = min(kWriteBatchWords, remainingWords);
+      for (size_t index = 0; index < batchWords; ++index) {
+        const size_t dataOffset = offset + segmentOffset + index * 4;
+        words[index] = static_cast<uint32_t>(data[dataOffset]) |
+                       (static_cast<uint32_t>(data[dataOffset + 1]) << 8) |
+                       (static_cast<uint32_t>(data[dataOffset + 2]) << 16) |
+                       (static_cast<uint32_t>(data[dataOffset + 3]) << 24);
+      }
+      if (!transport_.writeApBlock(kApDrw & 0x0C, words, batchWords, error)) {
         return false;
       }
+      segmentOffset += batchWords * 4;
     }
     offset += segmentBytes;
   }
@@ -184,21 +198,47 @@ bool Stm32SwdDebug::writeMemory16Block(uint32_t address, const uint8_t *data, si
     error = "MEM-AP half-word block writes require alignment";
     return false;
   }
+  if (length == 0) {
+    return true;
+  }
   if (!writeApRegister(kApCsw, kCswHalfWord, error)) {
     return false;
   }
-  if (!writeApRegister(kApTar, address, error)) {
-    return false;
-  }
-  if (!selectApBank(kApDrw >> 4, error)) {
-    return false;
-  }
-  for (size_t offset = 0; offset < length; offset += 2) {
-    const uint16_t halfWord = static_cast<uint16_t>(data[offset] | (static_cast<uint16_t>(data[offset + 1]) << 8));
-    const uint32_t shiftedValue = static_cast<uint32_t>(halfWord) << (((address + offset) & 0x2U) * 8U);
-    if (!transport_.writeAp(kApDrw & 0x0C, shiftedValue, error)) {
+
+  constexpr size_t kWriteBatchHalfWords = 128;
+  uint32_t values[kWriteBatchHalfWords];
+  size_t offset = 0;
+  while (offset < length) {
+    const uint32_t currentAddress = address + offset;
+    size_t segmentBytes = min(length - offset, static_cast<size_t>(1024 - (currentAddress & 0x3FFU)));
+    segmentBytes &= ~static_cast<size_t>(0x1U);
+    if (segmentBytes == 0) {
+      error = "MEM-AP half-word block segment is empty";
       return false;
     }
+    if (!writeApRegister(kApTar, currentAddress, error)) {
+      return false;
+    }
+    if (!selectApBank(kApDrw >> 4, error)) {
+      return false;
+    }
+
+    size_t segmentOffset = 0;
+    while (segmentOffset < segmentBytes) {
+      const size_t remainingHalfWords = (segmentBytes - segmentOffset) / 2;
+      const size_t batchHalfWords = min(kWriteBatchHalfWords, remainingHalfWords);
+      for (size_t index = 0; index < batchHalfWords; ++index) {
+        const size_t dataOffset = offset + segmentOffset + index * 2;
+        const uint32_t halfWord = static_cast<uint32_t>(data[dataOffset]) |
+                                  (static_cast<uint32_t>(data[dataOffset + 1]) << 8);
+        values[index] = halfWord << (((currentAddress + segmentOffset + index * 2) & 0x2U) * 8U);
+      }
+      if (!transport_.writeApBlock(kApDrw & 0x0C, values, batchHalfWords, error)) {
+        return false;
+      }
+      segmentOffset += batchHalfWords * 2;
+    }
+    offset += segmentBytes;
   }
   return true;
 }

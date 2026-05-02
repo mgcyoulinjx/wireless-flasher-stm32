@@ -14,6 +14,14 @@ constexpr int kMaxLogLines = 36;
 constexpr float kBatteryMinVoltage = 3.30f;
 constexpr float kBatteryMaxVoltage = 4.20f;
 constexpr float kBatteryDividerScale = 6.6f;
+constexpr float kChargeInstantRiseVoltage = 0.010f;
+constexpr float kChargeCumulativeRiseVoltage = 0.08f;
+constexpr float kChargeReferenceDropResetVoltage = 0.01f;
+constexpr float kChargeFullVoltage = 4.12f;
+constexpr float kChargeClearVoltage = 4.05f;
+constexpr uint32_t kChargeInstantHoldMs = 8000;
+constexpr uint32_t kChargeCumulativeHoldMs = 12000;
+constexpr uint32_t kChargeReferenceWindowMs = 5000;
 
 TFT_eSPI tft;
 CST816T touch(AppConfig::kTouchSdaPin, AppConfig::kTouchSclPin, AppConfig::kTouchResetPin, AppConfig::kTouchInterruptPin);
@@ -293,9 +301,47 @@ void DisplayManager::updateBattery() {
   const float voltage = (static_cast<float>(analogRead(kBatteryAdcPin)) / 4095.0f) * kBatteryDividerScale;
   if (!batteryFilterInitialized_) {
     filteredBatteryVoltage_ = voltage;
+    previousFilteredBatteryVoltage_ = voltage;
+    batteryRiseReferenceVoltage_ = voltage;
+    batteryRiseReferenceMs_ = now;
+    chargeIconHoldUntilMs_ = now;
+    chargeIconActive_ = false;
     batteryFilterInitialized_ = true;
   } else {
     filteredBatteryVoltage_ = filteredBatteryVoltage_ * 0.85f + voltage * 0.15f;
+  }
+
+  const float riseDelta = filteredBatteryVoltage_ - previousFilteredBatteryVoltage_;
+  previousFilteredBatteryVoltage_ = filteredBatteryVoltage_;
+
+  if (riseDelta >= kChargeInstantRiseVoltage) {
+    chargeIconActive_ = true;
+    chargeIconHoldUntilMs_ = now + kChargeInstantHoldMs;
+  }
+
+  if (filteredBatteryVoltage_ < batteryRiseReferenceVoltage_ - kChargeReferenceDropResetVoltage) {
+    batteryRiseReferenceVoltage_ = filteredBatteryVoltage_;
+    batteryRiseReferenceMs_ = now;
+  }
+
+  if (static_cast<int32_t>(now - batteryRiseReferenceMs_) > static_cast<int32_t>(kChargeReferenceWindowMs)) {
+    batteryRiseReferenceVoltage_ = filteredBatteryVoltage_;
+    batteryRiseReferenceMs_ = now;
+  }
+
+  if ((filteredBatteryVoltage_ - batteryRiseReferenceVoltage_) >= kChargeCumulativeRiseVoltage) {
+    chargeIconActive_ = true;
+    chargeIconHoldUntilMs_ = now + kChargeCumulativeHoldMs;
+    batteryRiseReferenceVoltage_ = filteredBatteryVoltage_;
+    batteryRiseReferenceMs_ = now;
+  }
+
+  if (filteredBatteryVoltage_ >= kChargeFullVoltage) {
+    chargeIconActive_ = true;
+  }
+
+  if (chargeIconActive_ && static_cast<int32_t>(now - chargeIconHoldUntilMs_) >= 0 && filteredBatteryVoltage_ <= kChargeClearVoltage) {
+    chargeIconActive_ = false;
   }
 
   float levelVoltage = filteredBatteryVoltage_;
@@ -318,7 +364,7 @@ void DisplayManager::updateBattery() {
     symbol = LV_SYMBOL_BATTERY_1;
   }
 
-  lv_label_set_text(batteryIconLabel_, symbol);
+  lv_label_set_text(batteryIconLabel_, chargeIconActive_ ? LV_SYMBOL_CHARGE : symbol);
   lv_label_set_text(batteryVoltageLabel_, (String(filteredBatteryVoltage_, 2) + "V").c_str());
 }
 

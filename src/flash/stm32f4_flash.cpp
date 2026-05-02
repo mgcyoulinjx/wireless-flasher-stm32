@@ -29,7 +29,7 @@ constexpr uint32_t kSectorStarts[] = {
 
 Stm32F4Flash::Stm32F4Flash(Stm32SwdDebug &debug) : debug_(debug) {}
 
-bool Stm32F4Flash::eraseRange(uint32_t address, size_t length, uint32_t flashEnd, String &error) {
+bool Stm32F4Flash::eraseRange(uint32_t address, size_t length, uint32_t flashEnd, Stm32Family family, String &error) {
   if (address < kFlashStart || length == 0 || address + length < address || address + length > flashEnd) {
     error = "STM32F4/F7 firmware exceeds internal flash range";
     return false;
@@ -46,7 +46,7 @@ bool Stm32F4Flash::eraseRange(uint32_t address, size_t length, uint32_t flashEnd
     return false;
   }
   for (int sector = firstSector; sector <= lastSector; ++sector) {
-    if (!eraseSector(sector, error)) {
+    if (!eraseSector(sector, family, error)) {
       return false;
     }
   }
@@ -162,13 +162,16 @@ uint32_t Stm32F4Flash::sectorStart(int sector) const {
   return kSectorStarts[sector];
 }
 
-bool Stm32F4Flash::eraseSector(int sector, String &error) {
+bool Stm32F4Flash::eraseSector(int sector, Stm32Family family, String &error) {
   if (!waitReady(error)) {
     return false;
   }
-  const uint32_t sectorBits = (static_cast<uint32_t>(sector) & 0x0FU) << 3;
-  const uint32_t snbHighBit = (static_cast<uint32_t>(sector) & 0x10U) << 19;
-  const uint32_t cr = kFlashCrSer | sectorBits | snbHighBit | kFlashCrPsize32;
+  if (sector > 11 && family == Stm32Family::F4) {
+    error = "STM32F4 sector is outside the supported single-bank layout";
+    return false;
+  }
+  const uint32_t sectorNumber = family == Stm32Family::F7 ? static_cast<uint32_t>(sector) : (static_cast<uint32_t>(sector) & 0x0FU);
+  const uint32_t cr = kFlashCrSer | (sectorNumber << 3) | kFlashCrPsize32;
   if (!debug_.writeMemory32(kFlashCr, cr, error)) {
     return false;
   }
