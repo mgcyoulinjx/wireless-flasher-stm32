@@ -175,16 +175,21 @@ bool Stm32H7SwdBackend::flash(const FlashManifest &manifest,
     error = "Flashing cancelled";
     return false;
   }
+  constexpr size_t kProgramChunkSize = 4096;
   const unsigned long programStarted = millis();
-  if (!flash_.programFlashWords(manifest.address, buffer.get(), alignedSize, error)) {
-    error = "SWD STM32H7 program failed: " + error;
-    return false;
-  }
-  if (progressCallback) {
-    String message = "SWD: programmed " + String(manifest.size) + " / " + String(manifest.size) + " bytes, " + String(millis() - programStarted) + " ms";
-    if (!progressCallback(manifest.size, manifest.size, message.c_str(), context)) {
-      error = "Flashing cancelled";
+  for (size_t offset = 0; offset < alignedSize; offset += kProgramChunkSize) {
+    const size_t chunkSize = min(kProgramChunkSize, alignedSize - offset);
+    if (!flash_.programFlashWords(manifest.address + offset, buffer.get() + offset, chunkSize, error)) {
+      error = "SWD STM32H7 program failed at 0x" + String(manifest.address + offset, HEX) + ": " + error;
       return false;
+    }
+    const size_t written = min(offset + chunkSize, manifest.size);
+    if (progressCallback) {
+      String message = "SWD: programmed " + String(written) + " / " + String(manifest.size) + " bytes, " + String(millis() - programStarted) + " ms";
+      if (!progressCallback(written, manifest.size, message.c_str(), context)) {
+        error = "Flashing cancelled";
+        return false;
+      }
     }
   }
 

@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <lvgl.h>
-#include "flash/flash_manager.h"
+class BuzzerManager;
 
 struct DisplaySnapshot {
   String stateLabel;
@@ -14,6 +14,7 @@ struct DisplaySnapshot {
   String selectedPackageId;
   String selectedPackageChip;
   String uiMessage;
+  String networkLog;
   String log;
   uint32_t selectedPackageAddress = 0;
   uint32_t selectedPackageCrc32 = 0;
@@ -34,6 +35,8 @@ public:
 
   void begin();
   void update(const DisplaySnapshot &snapshot);
+  void showFirmwareUpdateProgress(const String &message, const String &logEntry, size_t done, size_t total);
+  void setBuzzerManager(BuzzerManager *buzzerManager);
   void onFlash(ActionCallback callback, void *context);
   void onNext(ActionCallback callback, void *context);
   void onPrevious(ActionCallback callback, void *context);
@@ -45,6 +48,9 @@ private:
   DisplaySnapshot lastSnapshot_;
   String logText_;
   String lastLogEntry_;
+  String firmwareUpdateLogText_;
+  String lastFirmwareUpdateLogEntry_;
+  bool firmwareUpdatePageActive_ = false;
   bool lastFlashBusy_ = false;
   uint32_t lastBatteryUpdateMs_ = 0;
   float filteredBatteryVoltage_ = 0.0f;
@@ -65,6 +71,11 @@ private:
   lv_obj_t *progressBar_ = nullptr;
   lv_obj_t *progressLabel_ = nullptr;
   lv_obj_t *messageLabel_ = nullptr;
+  lv_obj_t *firmwareUpdateScreen_ = nullptr;
+  lv_obj_t *firmwareUpdateMessageLabel_ = nullptr;
+  lv_obj_t *firmwareUpdateProgressBar_ = nullptr;
+  lv_obj_t *firmwareUpdateProgressLabel_ = nullptr;
+  lv_obj_t *firmwareUpdateLogLabel_ = nullptr;
   lv_obj_t *prevButton_ = nullptr;
   lv_obj_t *flashButton_ = nullptr;
   lv_obj_t *flashButtonLabel_ = nullptr;
@@ -79,6 +90,7 @@ private:
 
   bool shouldUpdateWidgets(const DisplaySnapshot &snapshot) const;
   void createPage();
+  void createFirmwareUpdatePage();
   void updateWidgets(const DisplaySnapshot &snapshot);
   void updateBattery();
   String packageInfoText(const DisplaySnapshot &snapshot) const;
@@ -90,6 +102,8 @@ private:
   void invokeFlash();
   void invokeNext();
   void invokePrevious();
+  void playTouchPrompt();
+  void playBlockingTouchPrompt();
 
   static void handleFlashEvent(lv_event_t *event);
   static void handleNextEvent(lv_event_t *event);

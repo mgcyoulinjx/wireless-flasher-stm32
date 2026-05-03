@@ -5,6 +5,7 @@
 #include "package_store.h"
 
 class FlashManager;
+class BuzzerManager;
 
 class InputManager {
 public:
@@ -12,6 +13,7 @@ public:
 
   void begin();
   void update();
+  void setBuzzerManager(BuzzerManager *buzzerManager);
 
   String selectedPackageName() const;
   String selectedPackageId() const;
@@ -40,10 +42,12 @@ private:
 
   PackageStore &packageStore_;
   FlashManager &flashManager_;
+  BuzzerManager *buzzerManager_ = nullptr;
   std::vector<SavedPackageInfo> packages_;
   int selectedIndex_ = -1;
   String uiMessage_;
   uint32_t lastRefreshMs_ = 0;
+  uint32_t lastSeenPackagesVersion_ = 0;
   ButtonState leftButton_;
   ButtonState rightButton_;
   ButtonState pushButton_;
@@ -57,4 +61,6 @@ private:
   bool updateButton(ButtonState &button, bool &longPress);
   void handleKeys();
   void setMessage(const String &message);
+  void playPrompt();
+  void playBlockingPrompt();
 };

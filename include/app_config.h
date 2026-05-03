@@ -3,6 +3,7 @@
 #include <Arduino.h>
 
 namespace AppConfig {
+static constexpr const char *kFirmwareVersion = "0.1.8";
 static constexpr const char *kAccessPointSsid = "Exlink-Flasher";
 static constexpr const char *kAccessPointPassword = "12345678";
 inline IPAddress accessPointIp() { return IPAddress(192, 168, 4, 1); }
@@ -11,6 +12,8 @@ inline IPAddress subnetMask() { return IPAddress(255, 255, 255, 0); }
 static constexpr int kSwdIoPin = 11;
 static constexpr int kSwdClockPin = 12;
 static constexpr int kSwdResetPin = -1;
+static constexpr int kBuzzerPin = 3;
+static constexpr int kBuzzerLedcChannel = 1;
 static constexpr int kDisplayWidth = 240;
 static constexpr int kDisplayHeight = 284;
 static constexpr int kDisplayMosiPin = 8;

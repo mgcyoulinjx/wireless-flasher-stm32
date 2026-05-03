@@ -19,6 +19,8 @@ class PackageStore {
 public:
   bool begin();
   bool hasPackage() const;
+  bool savedPackagesDirty() const;
+  void clearSavedPackagesDirty();
   bool removePackage(String &error);
   bool appendIntelHexChunk(const uint8_t *data, size_t length, bool reset, String &error);
   bool finalizeIntelHexPackage(String &error);
@@ -27,6 +29,8 @@ public:
   bool listSavedPackages(JsonArray array, String &error) const;
   bool listSavedPackages(std::vector<SavedPackageInfo> &packages, String &error) const;
   String selectedSavedPackageId(String &error) const;
+  uint32_t savedPackagesVersion() const;
+  bool selectSavedPackage(const String &id, String &error);
   bool clearSelectedSavedPackage(String &error);
   bool saveActivePackage(const String &name, SavedPackageInfo &info, String &error, const String &replaceId = "");
   bool restoreSavedPackage(const String &id, String &error);
@@ -41,7 +45,12 @@ private:
   bool manifestExists_ = false;
   bool firmwareExists_ = false;
   size_t firmwareSize_ = 0;
+  bool savedPackagesDirty_ = false;
+  uint32_t savedPackagesVersion_ = 0;
+  std::vector<SavedPackageInfo> savedPackagesCache_;
+  String selectedSavedPackageIdCache_;
 
+  void updateSavedIndexCache(JsonDocument &doc);
   bool parseManifest(const String &json, FlashManifest &manifest, String &error) const;
   bool convertIntelHexToBinary(FlashManifest &manifest, String &error) const;
   bool scanIntelHex(uint32_t &minAddress, uint32_t &maxAddressExclusive, String &error) const;
@@ -49,7 +58,7 @@ private:
   uint32_t computeCrc32(const char *path, String &error) const;
   bool ensureFreeSpace(size_t bytes, String &error) const;
   bool loadSavedIndex(JsonDocument &doc, String &error) const;
-  bool saveSavedIndex(JsonDocument &doc, String &error) const;
+  bool saveSavedIndex(JsonDocument &doc, String &error);
   bool setSelectedSavedPackageId(const String &id, String &error);
   bool copyFile(const char *sourcePath, const char *destPath, String &error) const;
   bool removeUploadTemps(String &error);

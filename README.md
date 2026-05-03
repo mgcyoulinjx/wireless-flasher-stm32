@@ -4,19 +4,22 @@
 
 ## 功能特性
 
-- ESP32-S3 Wi-Fi 热点和内置网页界面
+- ESP32-S3 Wi-Fi 热点和内置网页界面，网页资源直接内置在固件中
 - 支持 STM32F1 / F4 / F7 / H7 通过 SWD 烧录
 - 默认接线只需要 SWDIO、SWCLK 和 GND，不强制连接 NRST
 - 支持上传 Intel HEX，并自动解析地址和校验信息
 - 自动转换并保存内部二进制固件包
 - 固件包大小和 CRC32 校验
-- LittleFS 保存固件包列表
-- 重启后保留已选择的待烧录固件
-- 网页显示 LittleFS 存储占用和剩余空间
+- LittleFS 保存固件包列表，不再依赖 `uploadfs` 更新网页
+- 网页和设备屏幕同步已选择的待烧录固件，烧录开始时才加载保存的固件包
+- 网页显示电池、整片 Flash、分区、LittleFS、RAM 和 PSRAM 使用情况
 - 网页日志窗口支持一键复制
 - 显示烧录进度、状态日志、耗时日志，并支持取消烧录
 - 通过 SWD 读取并显示当前 STM32 芯片型号
 - TFT 屏显示运行状态、电池电压和充电图标
+- 支持网页升级 ESP32 自身固件，提供上传进度、OTA 写入进度和断电提醒
+- ESP32 OTA 后会自动把运行在 `ota_1` 的固件回写到 `ota_0`，并在屏幕显示独立回写页面、进度条和日志
+- 烧录成功后播放提示旋律，提示音开关和音量可在网页设置中调整
 
 ## 硬件接线
 
@@ -66,9 +69,11 @@ platformio run --target upload
 
 默认上传波特率为 460800。
 
+网页界面已经内置在 ESP32 固件中。不要为了更新网页执行 `platformio run --target uploadfs`，否则会擦除 LittleFS 中保存的 STM32 固件包。
+
 ## Release 固件烧录偏移
 
-Release 固件包中包含已编译的 ESP32-S3 固件和必要启动文件。可以按以下偏移烧录：
+Release 固件包中包含已编译的 ESP32-S3 固件和必要启动文件，也包含网页 OTA 可直接上传使用的 `firmware.bin`。可以按以下偏移烧录：
 
 | 偏移地址 | 文件 |
 | --- | --- |
@@ -93,9 +98,9 @@ esptool.py --chip esp32s3 --baud 460800 write_flash \
 - `src/hal/`：SWD 传输和目标芯片控制
 - `src/storage/`：LittleFS 固件包存储
 - `src/web/`：内置网页服务器、HTML 和 JavaScript
-- `src/network/`：Wi-Fi 热点配置
-- `src/display/`：TFT 显示状态界面
-- `data/`：静态网页界面副本
+- `src/network/`：Wi-Fi 热点和路由器 Wi-Fi 配置
+- `src/display/`：TFT 显示状态界面和 ESP32 OTA 回写页面
+- `src/input/`：设备按键和屏幕选择逻辑
 - `boards/`：自定义 ESP32-S3 开发板定义
 
 ## 注意事项
@@ -103,3 +108,4 @@ esptool.py --chip esp32s3 --baud 460800 write_flash \
 - 默认 SWD 引脚为 GPIO11/GPIO12。
 - STM32F1 当前使用整片擦除；STM32F4 / F7 / H7 使用按固件范围擦除扇区。
 - 如果目标芯片 flash 后部保存了配置、序列号或校准数据，烧录前请确认所选系列的擦除策略是否符合需求。
+- ESP32 自身 OTA 升级和 ota_1 回写 ota_0 期间请保持供电稳定，不要突然断电。

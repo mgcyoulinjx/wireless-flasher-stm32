@@ -1,10 +1,11 @@
 #include "input_manager.h"
 
 #include "app_config.h"
+#include "buzzer_manager.h"
 #include "flash_manager.h"
 
 namespace {
-constexpr uint32_t kRefreshIntervalMs = 5000;
+constexpr uint32_t kRefreshIntervalMs = 30000;
 constexpr uint32_t kDebounceMs = 40;
 constexpr uint32_t kLongPressMs = 900;
 
@@ -32,10 +33,15 @@ void InputManager::begin() {
 }
 
 void InputManager::update() {
-  if (millis() - lastRefreshMs_ > kRefreshIntervalMs) {
+  const uint32_t version = packageStore_.savedPackagesVersion();
+  if (version != lastSeenPackagesVersion_ || millis() - lastRefreshMs_ > kRefreshIntervalMs) {
     refreshPackages(true);
   }
   handleKeys();
+}
+
+void InputManager::setBuzzerManager(BuzzerManager *buzzerManager) {
+  buzzerManager_ = buzzerManager;
 }
 
 String InputManager::selectedPackageName() const {
@@ -125,20 +131,18 @@ void InputManager::refreshPackages(bool preserveSelection) {
   packages_ = packages;
   selectedIndex_ = -1;
 
-  if (preserveSelection) {
-    selectedIndex_ = findPackageIndex(packages_, previousId);
+  const String selectedId = packageStore_.selectedSavedPackageId(error);
+  if (!error.isEmpty()) {
+    setMessage(error);
   }
-  if (selectedIndex_ < 0) {
-    String selectedId = packageStore_.selectedSavedPackageId(error);
-    if (!error.isEmpty()) {
-      setMessage(error);
-    }
+  if (!selectedId.isEmpty()) {
     selectedIndex_ = findPackageIndex(packages_, selectedId);
   }
-  if (selectedIndex_ < 0 && !packages_.empty()) {
-    selectedIndex_ = 0;
+  if (selectedIndex_ < 0 && preserveSelection && !selectedId.isEmpty()) {
+    selectedIndex_ = findPackageIndex(packages_, previousId);
   }
 
+  lastSeenPackagesVersion_ = packageStore_.savedPackagesVersion();
   lastRefreshMs_ = millis();
 }
 
@@ -151,7 +155,13 @@ void InputManager::selectNext() {
     setMessage("No saved firmware");
     return;
   }
-  selectedIndex_ = (selectedIndex_ + 1) % static_cast<int>(packages_.size());
+  const int nextIndex = (selectedIndex_ + 1) % static_cast<int>(packages_.size());
+  String error;
+  if (!packageStore_.selectSavedPackage(packages_[nextIndex].id, error)) {
+    setMessage(error);
+    return;
+  }
+  selectedIndex_ = nextIndex;
   setMessage("Selected " + packages_[selectedIndex_].name);
 }
 
@@ -164,7 +174,13 @@ void InputManager::selectPrevious() {
     setMessage("No saved firmware");
     return;
   }
-  selectedIndex_ = selectedIndex_ <= 0 ? static_cast<int>(packages_.size()) - 1 : selectedIndex_ - 1;
+  const int previousIndex = selectedIndex_ <= 0 ? static_cast<int>(packages_.size()) - 1 : selectedIndex_ - 1;
+  String error;
+  if (!packageStore_.selectSavedPackage(packages_[previousIndex].id, error)) {
+    setMessage(error);
+    return;
+  }
+  selectedIndex_ = previousIndex;
   setMessage("Selected " + packages_[selectedIndex_].name);
 }
 
@@ -256,26 +272,44 @@ void InputManager::handleKeys() {
   bool longPress = false;
   if (updateButton(leftButton_, longPress)) {
     selectPrevious();
+    playPrompt();
   }
   if (longPress) {
+    playPrompt();
     cancelOrRefresh();
   }
 
   if (updateButton(rightButton_, longPress)) {
     selectNext();
+    playPrompt();
   }
   if (longPress) {
+    playPrompt();
     cancelOrRefresh();
   }
 
   if (updateButton(pushButton_, longPress)) {
     confirmFlash();
+    playPrompt();
   }
   if (longPress) {
+    playPrompt();
     cancelOrRefresh();
   }
 }
 
 void InputManager::setMessage(const String &message) {
   uiMessage_ = message;
+}
+
+void InputManager::playPrompt() {
+  if (buzzerManager_) {
+    buzzerManager_->playPrompt();
+  }
+}
+
+void InputManager::playBlockingPrompt() {
+  if (buzzerManager_) {
+    buzzerManager_->playBlockingPrompt();
+  }
 }

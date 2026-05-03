@@ -57,11 +57,25 @@ bool PackageStore::begin() {
   manifestExists_ = LittleFS.exists(AppConfig::kManifestPath);
   firmwareExists_ = LittleFS.exists(AppConfig::kFirmwarePath);
   firmwareSize_ = firmwareExists_ ? LittleFS.open(AppConfig::kFirmwarePath, FILE_READ).size() : 0;
+  JsonDocument index;
+  String error;
+  if (!loadSavedIndex(index, error)) {
+    return false;
+  }
+  updateSavedIndexCache(index);
   return true;
 }
 
 bool PackageStore::hasPackage() const {
   return manifestExists_ && firmwareExists_ && firmwareSize_ > 0;
+}
+
+bool PackageStore::savedPackagesDirty() const {
+  return savedPackagesDirty_;
+}
+
+void PackageStore::clearSavedPackagesDirty() {
+  savedPackagesDirty_ = false;
 }
 
 bool PackageStore::removePackage(String &error) {
@@ -260,62 +274,36 @@ size_t PackageStore::freeBytes() const {
 }
 
 bool PackageStore::listSavedPackages(JsonArray array, String &error) const {
-  JsonDocument index;
-  if (!loadSavedIndex(index, error)) {
-    return false;
-  }
-
-  JsonArray packages = index["packages"].as<JsonArray>();
-  for (JsonObject package : packages) {
+  error = "";
+  for (const SavedPackageInfo &package : savedPackagesCache_) {
     JsonObject item = array.add<JsonObject>();
-    item["id"] = package["id"] | "";
-    item["name"] = package["name"] | "";
-    item["chip"] = package["chip"] | "";
-    item["address"] = package["address"] | 0;
-    item["size"] = package["size"] | 0;
-    item["crc32"] = package["crc32"] | 0;
-    item["createdMs"] = package["createdMs"] | 0;
+    item["id"] = package.id;
+    item["name"] = package.name;
+    item["chip"] = package.chip;
+    item["address"] = package.address;
+    item["size"] = package.size;
+    item["crc32"] = package.crc32;
   }
   return true;
 }
 
 bool PackageStore::listSavedPackages(std::vector<SavedPackageInfo> &packages, String &error) const {
-  packages.clear();
-  JsonDocument index;
-  if (!loadSavedIndex(index, error)) {
-    return false;
-  }
-
-  JsonArray savedPackages = index["packages"].as<JsonArray>();
-  for (JsonObject package : savedPackages) {
-    SavedPackageInfo info;
-    info.id = package["id"] | "";
-    info.name = package["name"] | "";
-    info.chip = package["chip"] | "";
-    info.address = package["address"] | 0;
-    info.size = package["size"] | 0;
-    info.crc32 = package["crc32"] | 0;
-    packages.push_back(info);
-  }
+  error = "";
+  packages = savedPackagesCache_;
   return true;
 }
 
 String PackageStore::selectedSavedPackageId(String &error) const {
-  JsonDocument index;
-  if (!loadSavedIndex(index, error)) {
-    return "";
-  }
-  const String selectedId = index["selectedId"] | "";
-  if (selectedId.isEmpty()) {
-    return "";
-  }
-  JsonArray packages = index["packages"].as<JsonArray>();
-  for (JsonObject package : packages) {
-    if (String(package["id"] | "") == selectedId) {
-      return selectedId;
-    }
-  }
-  return "";
+  error = "";
+  return selectedSavedPackageIdCache_;
+}
+
+uint32_t PackageStore::savedPackagesVersion() const {
+  return savedPackagesVersion_;
+}
+
+bool PackageStore::selectSavedPackage(const String &id, String &error) {
+  return setSelectedSavedPackageId(id, error);
 }
 
 bool PackageStore::clearSelectedSavedPackage(String &error) {
@@ -889,6 +877,29 @@ bool PackageStore::ensureFreeSpace(size_t bytes, String &error) const {
   return false;
 }
 
+void PackageStore::updateSavedIndexCache(JsonDocument &doc) {
+  savedPackagesCache_.clear();
+  JsonArray packages = doc["packages"].as<JsonArray>();
+  selectedSavedPackageIdCache_ = doc["selectedId"] | "";
+  bool selectedExists = selectedSavedPackageIdCache_.isEmpty();
+  for (JsonObject package : packages) {
+    SavedPackageInfo info;
+    info.id = package["id"] | "";
+    info.name = package["name"] | "";
+    info.chip = package["chip"] | "";
+    info.address = package["address"] | 0;
+    info.size = package["size"] | 0;
+    info.crc32 = package["crc32"] | 0;
+    if (info.id == selectedSavedPackageIdCache_) {
+      selectedExists = true;
+    }
+    savedPackagesCache_.push_back(info);
+  }
+  if (!selectedExists) {
+    selectedSavedPackageIdCache_ = "";
+  }
+}
+
 bool PackageStore::loadSavedIndex(JsonDocument &doc, String &error) const {
   doc.clear();
   if (!LittleFS.exists(AppConfig::kSavedPackagesIndexPath)) {
@@ -913,7 +924,7 @@ bool PackageStore::loadSavedIndex(JsonDocument &doc, String &error) const {
   return true;
 }
 
-bool PackageStore::saveSavedIndex(JsonDocument &doc, String &error) const {
+bool PackageStore::saveSavedIndex(JsonDocument &doc, String &error) {
   File file = LittleFS.open(AppConfig::kSavedPackagesIndexTempPath, FILE_WRITE);
   if (!file) {
     error = "Failed to write saved package index";
@@ -930,6 +941,9 @@ bool PackageStore::saveSavedIndex(JsonDocument &doc, String &error) const {
     error = "Failed to save package index";
     return false;
   }
+  updateSavedIndexCache(doc);
+  savedPackagesDirty_ = true;
+  ++savedPackagesVersion_;
   return true;
 }
 

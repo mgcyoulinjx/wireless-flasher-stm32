@@ -3,6 +3,7 @@
 #include <CST816T.h>
 #include <TFT_eSPI.h>
 #include "app_config.h"
+#include "buzzer_manager.h"
 
 LV_FONT_DECLARE(lv_font_harmonyos_sans_sc_16_gb2312);
 
@@ -27,6 +28,7 @@ TFT_eSPI tft;
 CST816T touch(AppConfig::kTouchSdaPin, AppConfig::kTouchSclPin, AppConfig::kTouchResetPin, AppConfig::kTouchInterruptPin);
 lv_disp_draw_buf_t drawBuf;
 lv_color_t drawBuffer[AppConfig::kDisplayWidth * kBufferLines];
+BuzzerManager *touchBuzzerManager = nullptr;
 
 void flushDisplay(lv_disp_drv_t *disp, const lv_area_t *area, lv_color_t *colorP) {
   const uint32_t width = area->x2 - area->x1 + 1;
@@ -142,6 +144,12 @@ void DisplayManager::update(const DisplaySnapshot &snapshot) {
     lastTickMs_ = now;
   }
 
+  if (firmwareUpdatePageActive_) {
+    lv_scr_load(screen_);
+    firmwareUpdatePageActive_ = false;
+    firstFrame_ = true;
+  }
+
   updateBattery();
 
   if (firstFrame_ || shouldUpdateWidgets(snapshot)) {
@@ -151,6 +159,50 @@ void DisplayManager::update(const DisplaySnapshot &snapshot) {
   }
 
   lv_timer_handler();
+}
+
+void DisplayManager::showFirmwareUpdateProgress(const String &message, const String &logEntry, size_t done, size_t total) {
+  if (!initialized_) {
+    return;
+  }
+
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - lastTickMs_;
+  if (elapsed > 0) {
+    lv_tick_inc(elapsed);
+    lastTickMs_ = now;
+  }
+
+  if (!firmwareUpdateScreen_) {
+    createFirmwareUpdatePage();
+  }
+  if (!firmwareUpdatePageActive_) {
+    firmwareUpdateLogText_ = "";
+    lastFirmwareUpdateLogEntry_ = "";
+    lv_scr_load(firmwareUpdateScreen_);
+    firmwareUpdatePageActive_ = true;
+  }
+
+  const int progress = total > 0 ? min(100, static_cast<int>((done * 100U) / total)) : 0;
+  lv_label_set_text(firmwareUpdateMessageLabel_, message.c_str());
+  lv_bar_set_value(firmwareUpdateProgressBar_, progress, LV_ANIM_OFF);
+  lv_label_set_text(firmwareUpdateProgressLabel_, (String(progress) + "%").c_str());
+  const String trimmedEntry = trimLogLines(logEntry);
+  if (trimmedEntry.length() && trimmedEntry != lastFirmwareUpdateLogEntry_) {
+    firmwareUpdateLogText_ = firmwareUpdateLogText_.length() ? firmwareUpdateLogText_ + "\n" + trimmedEntry : trimmedEntry;
+    firmwareUpdateLogText_ = trimLogLines(firmwareUpdateLogText_);
+    lastFirmwareUpdateLogEntry_ = trimmedEntry;
+    lv_label_set_text(firmwareUpdateLogLabel_, firmwareUpdateLogText_.c_str());
+    lv_obj_t *logCard = lv_obj_get_parent(firmwareUpdateLogLabel_);
+    lv_obj_update_layout(logCard);
+    lv_obj_scroll_to_y(logCard, LV_COORD_MAX, LV_ANIM_OFF);
+  }
+
+  lv_timer_handler();
+}
+
+void DisplayManager::setBuzzerManager(BuzzerManager *buzzerManager) {
+  touchBuzzerManager = buzzerManager;
 }
 
 void DisplayManager::onFlash(ActionCallback callback, void *context) {
@@ -175,7 +227,8 @@ bool DisplayManager::shouldUpdateWidgets(const DisplaySnapshot &snapshot) const 
          snapshot.selectedPackageName != lastSnapshot_.selectedPackageName ||
          snapshot.selectedPackageId != lastSnapshot_.selectedPackageId ||
          snapshot.selectedPackageChip != lastSnapshot_.selectedPackageChip ||
-         snapshot.uiMessage != lastSnapshot_.uiMessage || snapshot.log != lastSnapshot_.log ||
+         snapshot.uiMessage != lastSnapshot_.uiMessage || snapshot.networkLog != lastSnapshot_.networkLog ||
+         snapshot.log != lastSnapshot_.log ||
          snapshot.selectedPackageAddress != lastSnapshot_.selectedPackageAddress ||
          snapshot.selectedPackageCrc32 != lastSnapshot_.selectedPackageCrc32 ||
          snapshot.targetAddress != lastSnapshot_.targetAddress || snapshot.firmwareCrc32 != lastSnapshot_.firmwareCrc32 ||
@@ -184,6 +237,66 @@ bool DisplayManager::shouldUpdateWidgets(const DisplaySnapshot &snapshot) const 
          snapshot.savedPackageCount != lastSnapshot_.savedPackageCount ||
          snapshot.selectedPackageIndex != lastSnapshot_.selectedPackageIndex ||
          snapshot.packageReady != lastSnapshot_.packageReady || snapshot.flashBusy != lastSnapshot_.flashBusy;
+}
+
+void DisplayManager::createFirmwareUpdatePage() {
+  const int16_t width = tft.width();
+  const int16_t height = tft.height();
+  const int16_t margin = 8;
+  const int16_t contentWidth = width - margin * 2;
+  const int16_t progressLabelWidth = 44;
+  const int16_t progressGap = 8;
+  const int16_t progressBarWidth = contentWidth - progressLabelWidth - progressGap;
+
+  firmwareUpdateScreen_ = lv_obj_create(nullptr);
+  lv_obj_set_style_bg_color(firmwareUpdateScreen_, lv_color_hex(0x020617), 0);
+  lv_obj_clear_flag(firmwareUpdateScreen_, LV_OBJ_FLAG_SCROLLABLE);
+
+  lv_obj_t *titleLabel = makeLabel(firmwareUpdateScreen_, "ESP32 固件升级", &lv_font_harmonyos_sans_sc_16_gb2312, lv_color_hex(0xF8FAFC));
+  lv_obj_set_width(titleLabel, contentWidth);
+  lv_obj_set_style_text_align(titleLabel, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(titleLabel, LV_ALIGN_TOP_MID, 0, 8);
+
+  lv_obj_t *warningCard = makeCard(firmwareUpdateScreen_, margin, 36, contentWidth, 58);
+  lv_obj_set_style_bg_color(warningCard, lv_color_hex(0x422006), 0);
+  lv_obj_set_style_border_color(warningCard, lv_color_hex(0xF59E0B), 0);
+  firmwareUpdateMessageLabel_ = makeLabel(warningCard, "正在准备回写 ota_0，请勿断电", &lv_font_harmonyos_sans_sc_16_gb2312, lv_color_hex(0xFEF3C7));
+  lv_obj_set_width(firmwareUpdateMessageLabel_, contentWidth - 16);
+  lv_label_set_long_mode(firmwareUpdateMessageLabel_, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(firmwareUpdateMessageLabel_, LV_TEXT_ALIGN_CENTER, 0);
+  lv_obj_align(firmwareUpdateMessageLabel_, LV_ALIGN_CENTER, 0, 0);
+
+  lv_obj_t *progressTitle = makeLabel(firmwareUpdateScreen_, "回写进度", &lv_font_harmonyos_sans_sc_16_gb2312, lv_color_hex(0xCBD5E1));
+  lv_obj_align(progressTitle, LV_ALIGN_TOP_LEFT, margin, 104);
+
+  firmwareUpdateProgressBar_ = lv_bar_create(firmwareUpdateScreen_);
+  lv_obj_set_pos(firmwareUpdateProgressBar_, margin, 128);
+  lv_obj_set_size(firmwareUpdateProgressBar_, progressBarWidth, 16);
+  lv_bar_set_range(firmwareUpdateProgressBar_, 0, 100);
+  lv_obj_set_style_radius(firmwareUpdateProgressBar_, 6, LV_PART_MAIN);
+  lv_obj_set_style_border_width(firmwareUpdateProgressBar_, 1, LV_PART_MAIN);
+  lv_obj_set_style_border_color(firmwareUpdateProgressBar_, lv_color_hex(0x64748B), LV_PART_MAIN);
+  lv_obj_set_style_bg_color(firmwareUpdateProgressBar_, lv_color_hex(0x1E293B), LV_PART_MAIN);
+  lv_obj_set_style_bg_opa(firmwareUpdateProgressBar_, LV_OPA_COVER, LV_PART_MAIN);
+  lv_obj_set_style_bg_color(firmwareUpdateProgressBar_, lv_color_hex(0xF59E0B), LV_PART_INDICATOR);
+
+  firmwareUpdateProgressLabel_ = makeLabel(firmwareUpdateScreen_, "0%", &lv_font_montserrat_14, lv_color_hex(0xF8FAFC));
+  lv_obj_set_width(firmwareUpdateProgressLabel_, progressLabelWidth);
+  lv_obj_align_to(firmwareUpdateProgressLabel_, firmwareUpdateProgressBar_, LV_ALIGN_OUT_RIGHT_MID, progressGap, 0);
+
+  lv_obj_t *logTitle = makeLabel(firmwareUpdateScreen_, "回写日志", &lv_font_harmonyos_sans_sc_16_gb2312, lv_color_hex(0xCBD5E1));
+  lv_obj_align(logTitle, LV_ALIGN_TOP_LEFT, margin, 156);
+
+  lv_obj_t *logCard = makeCard(firmwareUpdateScreen_, margin, 180, contentWidth, height - 188);
+  lv_obj_add_flag(logCard, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_dir(logCard, LV_DIR_VER);
+  lv_obj_set_scrollbar_mode(logCard, LV_SCROLLBAR_MODE_AUTO);
+  lv_obj_set_style_pad_bottom(logCard, 8, 0);
+  firmwareUpdateLogLabel_ = makeLabel(logCard, "等待回写开始", &lv_font_harmonyos_sans_sc_16_gb2312, lv_color_hex(0xCBD5E1));
+  lv_obj_set_width(firmwareUpdateLogLabel_, contentWidth - 20);
+  lv_label_set_long_mode(firmwareUpdateLogLabel_, LV_LABEL_LONG_WRAP);
+  lv_obj_set_style_text_align(firmwareUpdateLogLabel_, LV_TEXT_ALIGN_LEFT, 0);
+  lv_obj_align(firmwareUpdateLogLabel_, LV_ALIGN_TOP_LEFT, 4, 4);
 }
 
 void DisplayManager::createPage() {
@@ -528,6 +641,10 @@ String DisplayManager::messageText(const DisplaySnapshot &snapshot) const {
   } else {
     text = snapshot.message;
   }
+  if (snapshot.networkLog.length()) {
+    text += text.length() ? "\n" : "";
+    text += snapshot.networkLog;
+  }
 
   text.replace("Ready", "就绪");
   text.replace("Flash job started", "烧录任务已启动");
@@ -568,19 +685,34 @@ String DisplayManager::formatHex(uint32_t value, uint8_t minWidth) const {
 
 void DisplayManager::invokeFlash() {
   if (flashCallback_) {
+    playBlockingTouchPrompt();
     flashCallback_(flashContext_);
   }
 }
 
 void DisplayManager::invokeNext() {
   if (nextCallback_) {
+    playTouchPrompt();
     nextCallback_(nextContext_);
   }
 }
 
 void DisplayManager::invokePrevious() {
   if (previousCallback_) {
+    playTouchPrompt();
     previousCallback_(previousContext_);
+  }
+}
+
+void DisplayManager::playTouchPrompt() {
+  if (touchBuzzerManager) {
+    touchBuzzerManager->playPrompt();
+  }
+}
+
+void DisplayManager::playBlockingTouchPrompt() {
+  if (touchBuzzerManager) {
+    touchBuzzerManager->playBlockingPrompt();
   }
 }
 
