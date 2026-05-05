@@ -74,6 +74,7 @@ bool AccessPointManager::configureStation(const String &ssid, const String &pass
 
   stationSsid_ = trimmedSsid;
   stationPassword_ = password;
+  stationPassword_.trim();
   preferences_.putString(kPrefsSsidKey, stationSsid_);
   preferences_.putString(kPrefsPasswordKey, stationPassword_);
   startStationConnect();
@@ -129,6 +130,7 @@ bool AccessPointManager::scanNetworks(JsonArray networks, String &error) {
   }
 
   WiFi.scanDelete();
+  // ESP32 AP+STA mode disconnects station during scan; reconnect if previously configured.
   if (stationConfigured() && !stationConnected()) {
     startStationConnect();
   }

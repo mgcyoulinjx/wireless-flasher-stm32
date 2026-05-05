@@ -33,7 +33,6 @@ private:
   bool initialized_ = false;
   bool playing_ = false;
   bool enabled_ = true;
-  bool outputOn_ = false;
 
   void start(const Note *notes, uint8_t count);
   void playCurrentNote();

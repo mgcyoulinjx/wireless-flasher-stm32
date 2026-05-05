@@ -28,7 +28,6 @@ public:
   void selectNextPackage();
   void selectPreviousPackage();
   void flashSelectedPackage();
-  void cancelOrRefreshPackages();
 
 private:
   struct ButtonState {
@@ -62,5 +61,4 @@ private:
   void handleKeys();
   void setMessage(const String &message);
   void playPrompt();
-  void playBlockingPrompt();
 };

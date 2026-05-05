@@ -70,15 +70,8 @@ bool PackageStore::hasPackage() const {
   return manifestExists_ && firmwareExists_ && firmwareSize_ > 0;
 }
 
-bool PackageStore::savedPackagesDirty() const {
-  return savedPackagesDirty_;
-}
-
-void PackageStore::clearSavedPackagesDirty() {
-  savedPackagesDirty_ = false;
-}
-
 bool PackageStore::removePackage(String &error) {
+  closeHexUpload();
   if (LittleFS.exists(AppConfig::kHexTempPath) && !LittleFS.remove(AppConfig::kHexTempPath)) {
     error = "Failed to remove temporary HEX";
     return false;
@@ -113,35 +106,49 @@ bool PackageStore::appendIntelHexChunk(const uint8_t *data, size_t length, bool 
   }
 
   if (reset) {
+    closeHexUpload();
+    hexUploadFreeSpaceChecked_ = false;
     LittleFS.remove(AppConfig::kHexTempPath);
     LittleFS.remove(AppConfig::kManifestTempPath);
     LittleFS.remove(AppConfig::kFirmwareTempPath);
   }
-  if (!ensureFreeSpace(length, error)) {
-    return false;
+
+  if (!hexUploadFreeSpaceChecked_) {
+    if (!ensureFreeSpace(length, error)) {
+      return false;
+    }
+    hexUploadFreeSpaceChecked_ = true;
   }
 
-  File file = LittleFS.open(AppConfig::kHexTempPath, reset ? FILE_WRITE : FILE_APPEND);
-  if (!file) {
-    error = "Failed to open Intel HEX file, LittleFS used " + String(LittleFS.usedBytes()) + " / " + String(LittleFS.totalBytes()) + " bytes";
-    return false;
+  if (!hexUploadFile_) {
+    hexUploadFile_ = LittleFS.open(AppConfig::kHexTempPath, reset ? FILE_WRITE : FILE_APPEND);
+    if (!hexUploadFile_) {
+      error = "Failed to open Intel HEX file, LittleFS used " + String(LittleFS.usedBytes()) + " / " + String(LittleFS.totalBytes()) + " bytes";
+      return false;
+    }
   }
-  if (file.size() + length > AppConfig::kMaxHexUploadSize) {
-    file.close();
+  if (hexUploadFile_.size() + length > AppConfig::kMaxHexUploadSize) {
+    closeHexUpload();
     error = "Intel HEX file is too large";
     return false;
   }
-  if (file.write(data, length) != length) {
-    file.close();
+  if (hexUploadFile_.write(data, length) != length) {
+    closeHexUpload();
     error = "Failed to append Intel HEX chunk";
     return false;
   }
 
-  file.close();
   return true;
 }
 
+void PackageStore::closeHexUpload() {
+  if (hexUploadFile_) {
+    hexUploadFile_.close();
+  }
+}
+
 bool PackageStore::finalizeIntelHexPackage(String &error) {
+  closeHexUpload();
   if (!LittleFS.exists(AppConfig::kHexTempPath)) {
     error = "Intel HEX file has not been uploaded";
     return false;
@@ -209,9 +216,12 @@ bool PackageStore::finalizePackage(String &error) {
   }
 
   if (manifest.crc32 != crc32) {
-    error = "Firmware checksum does not match manifest: expected 0x" + String(manifest.crc32, HEX) +
-            ", actual 0x" + String(crc32, HEX) + ", size " + String(size) + " bytes";
-    error.toUpperCase();
+    String hexExpected = String(manifest.crc32, HEX);
+    String hexActual = String(crc32, HEX);
+    hexExpected.toUpperCase();
+    hexActual.toUpperCase();
+    error = "Firmware checksum does not match manifest: expected 0x" + hexExpected +
+            ", actual 0x" + hexActual + ", size " + String(size) + " bytes";
     return false;
   }
 
@@ -942,7 +952,6 @@ bool PackageStore::saveSavedIndex(JsonDocument &doc, String &error) {
     return false;
   }
   updateSavedIndexCache(doc);
-  savedPackagesDirty_ = true;
   ++savedPackagesVersion_;
   return true;
 }
@@ -1031,7 +1040,13 @@ String PackageStore::generatePackageId() const {
       return candidate;
     }
   }
-  return id + "_x";
+  for (int suffix = 1000; suffix < 10000; ++suffix) {
+    String candidate = id + "_" + String(suffix);
+    if (!LittleFS.exists(savedManifestPath(candidate)) && !LittleFS.exists(savedFirmwarePath(candidate))) {
+      return candidate;
+    }
+  }
+  return id + "_fallback";
 }
 
 String PackageStore::savedManifestPath(const String &id) const {

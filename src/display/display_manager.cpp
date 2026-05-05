@@ -107,6 +107,7 @@ void DisplayManager::begin() {
 
   tft.init();
   tft.setRotation(3);
+  tft.fillScreen(TFT_BLACK);
   touch.begin();
   analogReadResolution(12);
 

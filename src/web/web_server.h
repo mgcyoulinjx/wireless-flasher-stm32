@@ -21,6 +21,7 @@ public:
                Preferences &preferences);
   void begin();
   void handleClient();
+  bool hasActiveUpload() const;
 
 private:
   AccessPointManager &apManager_;
@@ -31,6 +32,7 @@ private:
   BuzzerManager &buzzerManager_;
   Preferences &preferences_;
   WebServer *server_ = nullptr;
+  bool uploadActive_ = false;
 
   void configureRoutes();
   void handleIndex();

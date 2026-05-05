@@ -151,7 +151,6 @@ void BuzzerManager::playCurrentNote() {
 void BuzzerManager::stop() {
   ledcWrite(AppConfig::kBuzzerLedcChannel, 0);
   playing_ = false;
-  outputOn_ = false;
 }
 
 uint8_t BuzzerManager::duty() const {

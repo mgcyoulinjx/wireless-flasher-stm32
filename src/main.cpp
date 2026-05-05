@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include <WiFi.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>
 
@@ -45,6 +46,7 @@ String displayNetworkLog;
 FlashState lastFlashState = FlashState::Idle;
 bool lastStationConnected = false;
 bool lastFlashBusy = false;
+bool lastUploadActive = false;
 
 void serviceFirmwareUpdateProgress(const String &message, const String &logEntry, size_t done, size_t total) {
   displayManager.showFirmwareUpdateProgress(message, logEntry, done, total);
@@ -242,6 +244,13 @@ void setup() {
 }
 
 void loop() {
+  const bool busy = webServer.hasActiveUpload() || flashManager.isBusy();
+  if (busy != lastUploadActive) {
+    WiFi.setSleep(busy ? false : true);
+    setCpuFrequencyMhz(busy ? 240 : 160);
+    lastUploadActive = busy;
+  }
+
   accessPointManager.update();
   updateNetworkLog();
   webServer.handleClient();
@@ -249,5 +258,5 @@ void loop() {
   updateDetectedChip();
   displayManager.update(makeDisplaySnapshot());
   buzzerManager.update();
-  delay(2);
+  yield();
 }

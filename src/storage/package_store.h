@@ -19,8 +19,6 @@ class PackageStore {
 public:
   bool begin();
   bool hasPackage() const;
-  bool savedPackagesDirty() const;
-  void clearSavedPackagesDirty();
   bool removePackage(String &error);
   bool appendIntelHexChunk(const uint8_t *data, size_t length, bool reset, String &error);
   bool finalizeIntelHexPackage(String &error);
@@ -45,10 +43,11 @@ private:
   bool manifestExists_ = false;
   bool firmwareExists_ = false;
   size_t firmwareSize_ = 0;
-  bool savedPackagesDirty_ = false;
   uint32_t savedPackagesVersion_ = 0;
   std::vector<SavedPackageInfo> savedPackagesCache_;
   String selectedSavedPackageIdCache_;
+  File hexUploadFile_;
+  bool hexUploadFreeSpaceChecked_ = false;
 
   void updateSavedIndexCache(JsonDocument &doc);
   bool parseManifest(const String &json, FlashManifest &manifest, String &error) const;
@@ -62,6 +61,7 @@ private:
   bool setSelectedSavedPackageId(const String &id, String &error);
   bool copyFile(const char *sourcePath, const char *destPath, String &error) const;
   bool removeUploadTemps(String &error);
+  void closeHexUpload();
   String sanitizePackageName(const String &name) const;
   String generatePackageId() const;
   String savedManifestPath(const String &id) const;

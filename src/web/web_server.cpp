@@ -274,7 +274,7 @@ const char kEmbeddedIndexHtml[] PROGMEM = R"HTML(<!doctype html>
           <div id="settingsDeviceInfo" class="muted metric-block">正在加载设备状态...</div>
         </div>
         <div class="card">
-          <h2>ESP32 固件升级 · 当前版本 0.1.8</h2>
+          <h2>ESP32 固件升级 · 当前版本 0.1.13</h2>
           <p class="muted">上传 PlatformIO 生成的 firmware.bin，只更新设备本身固件，不会擦除 LittleFS 中保存的 STM32 固件包。</p>
           <label>ESP32 固件 .bin</label>
           <input id="esp32OtaFile" type="file" accept=".bin" />
@@ -1184,6 +1184,10 @@ void AppWebServer::handleClient() {
   }
 }
 
+bool AppWebServer::hasActiveUpload() const {
+  return uploadActive_;
+}
+
 void AppWebServer::configureRoutes() {
   server_->on("/", HTTP_GET, [this]() { handleIndex(); });
   server_->on("/app.js", HTTP_GET, [this]() {
@@ -1225,6 +1229,7 @@ void AppWebServer::configureRoutes() {
             sendError(400, "Only Intel HEX files are supported");
             return;
           }
+          uploadActive_ = true;
         }
 
         if (upload.status == UPLOAD_FILE_WRITE) {
@@ -1235,10 +1240,12 @@ void AppWebServer::configureRoutes() {
         }
 
         if (upload.status == UPLOAD_FILE_END) {
+          uploadActive_ = false;
           return;
         }
 
         if (upload.status == UPLOAD_FILE_ABORTED) {
+          uploadActive_ = false;
           return;
         }
       });
@@ -1547,6 +1554,7 @@ void AppWebServer::handleEsp32OtaFinalize() {
 void AppWebServer::handleEsp32OtaUpload() {
   HTTPUpload &upload = server_->upload();
   if (upload.status == UPLOAD_FILE_START) {
+    uploadActive_ = true;
     String filename = upload.filename;
     filename.toLowerCase();
     resetEsp32OtaStatus("starting", "正在检查 ESP32 固件文件", upload.totalSize);
@@ -1580,6 +1588,7 @@ void AppWebServer::handleEsp32OtaUpload() {
       }
     }
   } else if (upload.status == UPLOAD_FILE_END) {
+    uploadActive_ = false;
     if (Update.isRunning()) {
       esp32OtaStatus.phase = "finalizing";
       esp32OtaStatus.message = "正在校验并完成 ESP32 OTA";
@@ -1595,6 +1604,7 @@ void AppWebServer::handleEsp32OtaUpload() {
       }
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    uploadActive_ = false;
     esp32OtaStatus.active = false;
     esp32OtaStatus.error = true;
     esp32OtaStatus.phase = "aborted";

@@ -47,7 +47,7 @@
 
 ## 编译
 
-本项目使用 PlatformIO。
+本项目使用 PlatformIO，所有依赖库（lvgl、TFT_eSPI、FT6336U）已包含在 `lib/` 中，克隆后即可直接编译，无需额外配置。
 
 ```bash
 platformio run
@@ -59,7 +59,7 @@ platformio run
 - 开发板：`exlink_esp32s3_16mb`
 - 框架：Arduino
 - 文件系统：LittleFS
-- 分区表：`my.csv`
+- 分区表：`partitions_16mb_ota.csv`
 
 ## 上传到 ESP32-S3
 
@@ -102,6 +102,7 @@ esptool.py --chip esp32s3 --baud 460800 write_flash \
 - `src/display/`：TFT 显示状态界面和 ESP32 OTA 回写页面
 - `src/input/`：设备按键和屏幕选择逻辑
 - `boards/`：自定义 ESP32-S3 开发板定义
+- `lib/`：项目依赖库（lvgl、TFT_eSPI、FT6336U）
 
 ## 注意事项
 

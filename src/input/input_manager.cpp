@@ -114,10 +114,6 @@ void InputManager::flashSelectedPackage() {
   confirmFlash();
 }
 
-void InputManager::cancelOrRefreshPackages() {
-  cancelOrRefresh();
-}
-
 void InputManager::refreshPackages(bool preserveSelection) {
   const String previousId = preserveSelection ? selectedPackageId() : "";
   String error;
@@ -308,8 +304,3 @@ void InputManager::playPrompt() {
   }
 }
 
-void InputManager::playBlockingPrompt() {
-  if (buzzerManager_) {
-    buzzerManager_->playBlockingPrompt();
-  }
-}
